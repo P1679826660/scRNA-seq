@@ -94,8 +94,63 @@ pbmcT <- CreateSeuratObject(
 #读取qs格式
 # 读取数据 (假设是qs格式已经转换完毕的seurat)
 # sc.obj <- qread("path/to/GSE149614.Tumor.qs") 
-# 演示用，假设对象已在环境中
-sc.obj <- sc.obj 
+
+###########################################################
+library(Seurat)
+library(dplyr) # 用于处理数据
+
+# ==============================================================================
+# 步骤 1: 读取外部 Metadata 文件
+# ==============================================================================
+# 假设 metadata 是 csv 或 txt 文件
+# header=T: 第一行是列名
+# row.names=1: 【关键】直接尝试把第一列作为行名读取
+# check.names=F: 防止 R 把细胞名里的 '-' 变成 '.'
+meta_file <- "GSEXXXX_metadata.csv" 
+
+# 如果是 csv
+metadata <- read.csv(meta_file, header = TRUE, row.names = 1, check.names = FALSE)
+
+# 如果是 txt (制表符分隔)
+# metadata <- read.table(meta_file, header = TRUE, row.names = 1, sep = "\t", check.names = FALSE)
+
+head(metadata)
+
+# ==============================================================================
+# 步骤 2: 【至关重要】核对细胞名格式
+# ==============================================================================
+# 很多时候，外部文件的细胞名和 Seurat 里的细胞名长得不一样
+# 比如：Seurat 里是 "Sample1_AAACCC...", 而文件里只有 "AAACCC..."
+
+head(colnames(sc.obj))
+head(rownames(metadata))
+
+# --- 检查交集 ---
+# 计算有多少细胞是名字完全一样的
+common_cells <- intersect(colnames(sc.obj), rownames(metadata))
+cat("Seurat 细胞总数:", ncol(sc.obj), "\n")
+cat("Metadata 记录数:", nrow(metadata), "\n")
+cat("名字能匹配上的数量:", length(common_cells), "\n")
+
+if (length(common_cells) == 0) {
+  stop("错误：没有一个细胞名能匹配上！请检查两个数据的命名格式差异。")
+} else if (length(common_cells) < ncol(sc.obj)) {
+  warning("警告：只有部分细胞匹配成功，未匹配的细胞其新Metadata将为 NA。")
+}
+
+# ==============================================================================
+# 步骤 3: 写入 Metadata
+# ==============================================================================
+# 只要行名对得上，Seurat 会自动匹配，不需要顺序一致
+sc.obj <- AddMetaData(object = sc.obj, metadata = metadata)
+# ==============================================================================
+# 步骤 4: 验证结果
+# ==============================================================================
+print("写入后的 Seurat Metadata:")
+head(sc.obj@meta.data)
+################################################
+
+
 
 # 2.1 计算线粒体基因比例
 # 线粒体比例过高通常意味着细胞破裂或死细胞
@@ -321,4 +376,5 @@ markers <- FindAllMarkers(
 write.csv(markers, file = "celltype_markers.csv", row.names = FALSE)
 
 print("全部分析流程结束！")
+
 
