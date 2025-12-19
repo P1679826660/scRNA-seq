@@ -15,13 +15,84 @@ library(scDblFinder)   # 去除双细胞
 library(SingleCellExperiment) # scDblFinder需要的数据格式
 library(decontX)       # 去除游离RNA污染 (背景噪音)
 library(viridis)       # 美观的配色方案
-library(dplyr)         # 数据处理神器 (mutate, filter等)
+library(tidyverse)         # 数据处理神器 (mutate, filter等)
 
 # ---
 # 2. 数据加载与初步质控 (QC)
 # ---
 
-# 读取数据 (假设是qs格式)
+#第一种格式，经典10X
+Cell Ranger输出的标准结果通常在一个名为 filtered_feature_bc_matrix 的文件夹里。 
+重要：你不需要解压内部的文件，只需要提供这个文件夹的路径。
+该文件夹内必须包含以下三个文件（文件名必须完全一致，可以是压缩包 .gz）：
+barcodes.tsv.gz
+features.tsv.gz (旧版本可能是 genes.tsv)
+matrix.mtx.gz
+# 读取数据
+# Read10X 会自动寻找上述三个文件并构建稀疏矩阵
+counts_matrix <- Read10X("filtered_feature_bc_matrix")
+# 创建 Seurat 对象
+sc.obj <- CreateSeuratObject(
+  counts = counts_matrix,
+  project = "Sample1",       # 给你的项目或样本起个名字
+  min.cells = 3,             # 过滤掉：只在少于3个细胞中表达的基因（极低表达基因）
+  min.features = 200         # 过滤掉：检测到基因数少于200的细胞（通常是空液滴或死细胞）
+)
+
+#第二种格式，如果是filtered_feature_bc_matrix.h5，h5格式
+counts_matrix <- Read10X_h5(filename = h5_file)
+
+#第三种格式，TXT 表达矩阵读取
+library(data.table) # 用于 fread 快速读取大数据
+library(limma)      # 用于 avereps 处理重复基因
+library(Seurat)     # 单细胞分析核心包
+library(Matrix)     # 用于处理矩阵
+
+# ---
+# 步骤 2: 读取数据 (使用 fread 提速)
+# ---
+# data.table::fread 读取速度远快于 read.table，特别适合几百兆以上的大文件
+# check.names=F 保证细胞名中的特殊字符（如 "-"）不被自动修改为 "."
+file_path <- "sc.obj.txt"
+
+rt <- fread(file_path, sep = "\t", header = TRUE, check.names = FALSE)
+# 转换格式：fread读进来是data.table，我们需要分离基因列和表达量矩阵
+# 假设第一列是基因名 (Gene Symbol)
+gene_names <- rt[[1]]   # 提取第一列作为基因名向量
+expr_data  <- as.matrix(rt[, -1, with = FALSE]) # 提取除第一列外的所有列，转为矩阵
+
+# 立即删除原始读取的大对象，释放内存
+rm(rt)
+gc() 
+
+# 步骤 3: 处理重复基因 (去重)
+# 在单细胞或转录组数据中，经常会出现同名基因（由于注释版本或多转录本原因）。
+# 如果不处理，Seurat 会报错 "Duplicate feature names allowed"。
+# 使用 limma::avereps 对重复的基因名取平均值 (Average)
+# ID 参数指定了每一行对应的基因名
+# 这一步会合并重复行，并返回一个行名唯一的矩阵
+final_matrix <- limma::avereps(expr_data, ID = gene_names)
+
+# 再次清理内存
+rm(expr_data, gene_names)
+gc()
+
+# 步骤 4: 构建 Seurat 对象
+# min.cells = 5:    过滤掉在少于5个细胞中表达的基因（低表达基因）
+# min.features = 300: 过滤掉检测到少于300个基因的细胞（低质量细胞/空液滴）
+# names.delim = "_": 如果细胞名是 "Sample1_Barcode" 格式，这会告诉Seurat前缀是样本名
+pbmcT <- CreateSeuratObject(
+  counts = final_matrix,
+  project = "seurat",
+  min.cells = 5,
+  min.features = 300,
+  names.delim = "_"
+)
+
+
+
+#读取qs格式
+# 读取数据 (假设是qs格式已经转换完毕的seurat)
 # sc.obj <- qread("path/to/GSE149614.Tumor.qs") 
 # 演示用，假设对象已在环境中
 sc.obj <- sc.obj 
@@ -250,3 +321,4 @@ markers <- FindAllMarkers(
 write.csv(markers, file = "celltype_markers.csv", row.names = FALSE)
 
 print("全部分析流程结束！")
+
