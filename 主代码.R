@@ -48,46 +48,27 @@ library(limma)      # 用于 avereps 处理重复基因
 library(Seurat)     # 单细胞分析核心包
 library(Matrix)     # 用于处理矩阵
 
-# ---
-# 步骤 2: 读取数据 (使用 fread 提速)
-# ---
-# data.table::fread 读取速度远快于 read.table，特别适合几百兆以上的大文件
-# check.names=F 保证细胞名中的特殊字符（如 "-"）不被自动修改为 "."
-file_path <- "sc.obj.txt"
-
+file_path <- "c.txt"
 rt <- fread(file_path, sep = "\t", header = TRUE, check.names = FALSE)
-# 转换格式：fread读进来是data.table，我们需要分离基因列和表达量矩阵
-# 假设第一列是基因名 (Gene Symbol)
-gene_names <- rt[[1]]   # 提取第一列作为基因名向量
-expr_data  <- as.matrix(rt[, -1, with = FALSE]) # 提取除第一列外的所有列，转为矩阵
-rownames(expr_data) <- gene_names
-# 立即删除原始读取的大对象，释放内存
-rm(rt)
-gc() 
-
-# 步骤 3: 处理重复基因 (去重)
-# 在单细胞或转录组数据中，经常会出现同名基因（由于注释版本或多转录本原因）。
-# 如果不处理，Seurat 会报错 "Duplicate feature names allowed"。
-# 使用 limma::avereps 对重复的基因名取平均值 (Average)
-# ID 参数指定了每一行对应的基因名
-# 这一步会合并重复行，并返回一个行名唯一的矩阵
+# 1. 预处理基因名，防止字符替换冲突
+gene_names <- gsub("_", "-", rt[[1]])
+expr_data  <- as.matrix(rt[, -1, with = FALSE])
+# 2. 处理重复基因名
 final_matrix <- limma::avereps(expr_data, ID = gene_names)
-
-# 再次清理内存
-rm(expr_data, gene_names)
-gc()
-
-# 步骤 4: 构建 Seurat 对象
-# min.cells = 5:    过滤掉在少于5个细胞中表达的基因（低表达基因）
-# min.features = 300: 过滤掉检测到少于300个基因的细胞（低质量细胞/空液滴）
-# names.delim = "_": 如果细胞名是 "Sample1_Barcode" 格式，这会告诉Seurat前缀是样本名
-pbmcT <- CreateSeuratObject(
+# 3. 检查并处理重复的细胞名（列名）
+if(any(duplicated(colnames(final_matrix)))){
+  colnames(final_matrix) <- make.unique(colnames(final_matrix))
+}
+# 4. 显式转换为稀疏矩阵
+final_matrix <- as(final_matrix, "dgCMatrix")
+# 5. 创建 Seurat 对象
+sc.obj <- CreateSeuratObject(
   counts = final_matrix,
   project = "seurat",
   min.cells = 5,
-  min.features = 300,
-  names.delim = "_"
+  min.features = 300
 )
+
 
 
 
@@ -376,6 +357,7 @@ markers <- FindAllMarkers(
 write.csv(markers, file = "celltype_markers.csv", row.names = FALSE)
 
 print("全部分析流程结束！")
+
 
 
 
