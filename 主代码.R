@@ -55,12 +55,7 @@ gene_names <- gsub("_", "-", rt[[1]])
 expr_data  <- as.matrix(rt[, -1, with = FALSE])
 # 2. 处理重复基因名
 final_matrix <- limma::avereps(expr_data, ID = gene_names)
-# 3. 检查并处理重复的细胞名（列名）
-if(any(duplicated(colnames(final_matrix)))){
-  colnames(final_matrix) <- make.unique(colnames(final_matrix))
-}
-# 4. 显式转换为稀疏矩阵
-final_matrix <- as(final_matrix, "dgCMatrix")
+
 # 5. 创建 Seurat 对象
 sc.obj <- CreateSeuratObject(
   counts = final_matrix,
