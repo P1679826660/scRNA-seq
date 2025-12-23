@@ -60,7 +60,7 @@ rt <- fread(file_path, sep = "\t", header = TRUE, check.names = FALSE)
 # 假设第一列是基因名 (Gene Symbol)
 gene_names <- rt[[1]]   # 提取第一列作为基因名向量
 expr_data  <- as.matrix(rt[, -1, with = FALSE]) # 提取除第一列外的所有列，转为矩阵
-
+rownames(expr_data) <- gene_names
 # 立即删除原始读取的大对象，释放内存
 rm(rt)
 gc() 
@@ -376,5 +376,6 @@ markers <- FindAllMarkers(
 write.csv(markers, file = "celltype_markers.csv", row.names = FALSE)
 
 print("全部分析流程结束！")
+
 
 
