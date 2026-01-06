@@ -50,15 +50,14 @@ library(Matrix)     # 用于处理矩阵
 
 file_path <- "c.txt"
 rt <- fread(file_path, sep = "\t", header = TRUE, check.names = FALSE)
-# 1. 预处理基因名，防止字符替换冲突
-gene_names <- gsub("_", "-", rt[[1]])
-expr_data  <- as.matrix(rt[, -1, with = FALSE])
-# 2. 处理重复基因名
-final_matrix <- limma::avereps(expr_data, ID = gene_names)
+exp <- as.matrix(rt[, -1, with=FALSE])  
+rownames(exp) <- rt[[1]] 
+data <- limma::avereps(exp)  
+gc()
 
 # 5. 创建 Seurat 对象
 sc.obj <- CreateSeuratObject(
-  counts = final_matrix,
+  counts = data,
   project = "seurat",
   min.cells = 5,
   min.features = 300
@@ -352,6 +351,7 @@ markers <- FindAllMarkers(
 write.csv(markers, file = "celltype_markers.csv", row.names = FALSE)
 
 print("全部分析流程结束！")
+
 
 
 
