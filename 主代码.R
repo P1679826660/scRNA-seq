@@ -70,6 +70,52 @@ sc.obj <- CreateSeuratObject(
 # 读取数据 (假设是qs格式已经转换完毕的seurat)
 # sc.obj <- qread("path/to/GSE149614.Tumor.qs") 
 
+
+
+#批量10x在同一个文件夹
+library(Seurat)
+library(qs)
+library(harmony)
+library(ggplot2)
+
+# 设置数据文件夹路径
+data_dir <- "GSE217845_RAW"
+
+# 以 matrix 文件为锚点获取文件列表
+mtx_files <- list.files(data_dir, pattern = "matrix.mtx.gz", full.names = TRUE)
+
+# 循环读取并转换
+obj_list <- lapply(mtx_files, function(mtx) {
+  # 直接替换后缀得到对应的 barcodes 和 features 文件路径
+  barcodes <- sub("matrix.mtx.gz", "barcodes.tsv.gz", mtx)
+  features <- sub("matrix.mtx.gz", "features.tsv.gz", mtx)
+  
+  # 清理文件名作为样本名 (去掉路径和后缀)
+  sample_name <- basename(sub("matrix.mtx.gz", "", mtx))
+  sample_name <- gsub("[_ ]$", "", sample_name) # 去掉末尾可能存在的空格或下划线
+  
+  # 读取矩阵并创建对象
+  counts <- ReadMtx(mtx = mtx, cells = barcodes, features = features)
+  CreateSeuratObject(counts = counts, project = sample_name)
+})
+
+# 提取每个对象的样本名作为 ID 前缀
+ids <- sapply(obj_list, function(x) Project(x))
+
+# 合并
+sc.obj <- merge(
+  x = obj_list[[1]],
+  y = obj_list[-1],
+  add.cell.ids = ids
+)
+
+sc.obj <- JoinLayers(sc.obj)
+
+head(sc.obj@meta.data)
+
+sc.obj$sample <- sub("_.*", "", sc.obj$orig.ident)
+
+
 ###########################################################
 library(Seurat)
 library(dplyr) # 用于处理数据
@@ -351,6 +397,7 @@ markers <- FindAllMarkers(
 write.csv(markers, file = "celltype_markers.csv", row.names = FALSE)
 
 print("全部分析流程结束！")
+
 
 
 
