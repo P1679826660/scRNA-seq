@@ -113,8 +113,6 @@ sc.obj <- JoinLayers(sc.obj)
 
 head(sc.obj@meta.data)
 
-sc.obj$sample <- sub("_.*", "", sc.obj$orig.ident)
-
 
 ###########################################################
 library(Seurat)
@@ -397,6 +395,7 @@ markers <- FindAllMarkers(
 write.csv(markers, file = "celltype_markers.csv", row.names = FALSE)
 
 print("全部分析流程结束！")
+
 
 
 
