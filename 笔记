@@ -1,0 +1,8 @@
+#切取字段
+x <- "GSM6727543_LPDAC_25_Tumor"
+# 按下划线切开，得到一个列表
+parts <- strsplit(x, split = "_")[[1]]
+
+# 取第2个
+print(parts[2]) 
+# 输出: "LPDAC"
