@@ -41,11 +41,8 @@ keep_cells_types <- c(observation_groups, reference_groups)
 sc.infer <- subset(sc.obj, subset = !!sym(annotation_column) %in% keep_cells_types)
 
 # 2.2 提取原始计数矩阵
-if (packageVersion("Seurat") >= "5.0.0") {
-  raw_counts_matrix <- Seurat::LayerData(sc.infer, assay = "RNA", layer = "counts")
-} else {
-  raw_counts_matrix <- GetAssayData(sc.infer, slot = "counts")
-}
+raw_counts_matrix <- GetAssayData(sc.infer, slot = "counts")
+
 
 # 2.3 构建并保存注释文件
 annotations_df <- data.frame(
@@ -155,3 +152,4 @@ malignant_obj <- subset(sc.obj, subset = Malignant_Status == "Malignant")
 qsave(malignant_obj, file.path(output_dir, "malignant_obj.qs"))
 
 print("分析全部结束。所有文件已保存至 inferCNV_output 文件夹。")
+
