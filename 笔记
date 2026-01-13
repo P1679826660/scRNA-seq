@@ -16,3 +16,16 @@ parts <- strsplit(x, split = "_")[[1]]
 result <- paste(parts[1:2], collapse = "_")
 print(result)
 # 输出: "GSM6727543_LPDAC"
+
+
+#如果是seurat
+library(stringr)
+
+# 语法非常像人话：
+# 对 orig.ident 这一列
+# 从第 1 个词取到第 2 个词
+# 词之间是用 "_" 分隔的
+sc.obj$group_id <- word(sc.obj$orig.ident, start = 1, end = 2, sep = "_")
+
+# 看看结果
+head(sc.obj$group_id)
