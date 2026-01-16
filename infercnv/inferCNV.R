@@ -35,7 +35,7 @@ if (!dir.exists(output_dir)) {
 # 步骤 2: 数据清洗与输入准备
 # ==============================================================================
 print("正在清洗数据：剔除未定义的细胞并提取Counts...")
-
+sc.obj@meta.data$seurat_clusters <- as.character(sc.obj@meta.data$seurat_clusters)
 # 2.1 筛选细胞：只保留观测组和参考组
 keep_cells_types <- c(observation_groups, reference_groups)
 sc.infer <- subset(sc.obj, subset = !!sym(annotation_column) %in% keep_cells_types)
@@ -152,4 +152,5 @@ malignant_obj <- subset(sc.obj, subset = Malignant_Status == "Malignant")
 qsave(malignant_obj, file.path(output_dir, "malignant_obj.qs"))
 
 print("分析全部结束。所有文件已保存至 inferCNV_output 文件夹。")
+
 
