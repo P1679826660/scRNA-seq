@@ -1,0 +1,118 @@
+library(Seurat)
+library(dplyr)
+
+# ===================== 1. 参数设置区域 (请在此处修改) =====================
+
+# 输入数据设置
+# 假设你的 Seurat 对象变量名为 seurat_obj
+seurat_obj = qs::qsave("xxxxxx.qs")
+
+# 请确保 seurat_obj 中包含以下列名
+col_celltype <- "celltype"   # 细胞类型注释的列名
+target_celltype <- "T"       # 你要分析的细胞类型 (例如 T)
+
+# 目标设置
+col_group    <- "group"      # 分组信息的列名
+target_group    <- "BB"      # 核心关注的分组 (亚健康)
+control_group_1 <- "AA"      # 对照组1 (非疾病)
+control_group_2 <- "CC"      # 对照组2 (疾病)
+
+# 阈值设置 (Log2FC > 1 代表表达量翻倍)
+# 你提到两个可以分开设置，这里分别定义
+logfc_thresh_BB_vs_AA <- 1.0   # BB 对比 AA 的 logFC 阈值
+logfc_thresh_BB_vs_CC <- 1.0   # BB 对比 CC 的 logFC 阈值
+pval_adj_thresh       <- 0.05  # 矫正后 P 值阈值
+
+# 输出文件名前缀
+out_prefix <- "MyAnalysis_"
+
+# ===================== 2. 数据预处理 =====================
+
+# 检查对象是否存在 (此处假设你已经加载了 seurat_obj)
+if (!exists("seurat_obj")) {
+  stop("错误：未找到 'seurat_obj' 对象，请先加载你的 .rds 文件或创建对象。")
+}
+
+message(paste("正在提取细胞类型:", target_celltype))
+
+# 设置默认 Id 为细胞类型，以便提取子集
+Idents(seurat_obj) <- col_celltype
+
+# 提取特定细胞类型的子集对象
+# 这一步排除了 B, endo, epi 等其他细胞，只保留 T
+sub_seurat <- subset(seurat_obj, idents = target_celltype)
+
+# 检查提取后的细胞数量，防止某一组细胞太少报错
+table(sub_seurat[[col_group]])
+
+# 将子集的 Id 设置为分组，准备进行差异分析
+Idents(sub_seurat) <- col_group
+
+# ===================== 3. 差异分析计算 =====================
+
+# --- 比较 1: BB vs AA ---
+message(paste("正在计算:", target_group, "vs", control_group_1))
+deg_1 <- FindMarkers(
+  sub_seurat,
+  ident.1 = target_group,    # 目标组 (分子)
+  ident.2 = control_group_1, # 对照组 (分母)
+  logfc.threshold = 0,       # 先设为0算出所有结果，后续手动筛选
+  min.pct = 0.1,             # 只计算至少在10%细胞中表达的基因，提高速度
+  only.pos = TRUE            # 只寻找高表达基因(上调)，因为你要找BB特异性
+)
+
+# 筛选 1: 满足 logFC > 设定阈值 且 padj < 0.05
+res_1 <- deg_1 %>%
+  filter(avg_log2FC > logfc_thresh_BB_vs_AA & p_val_adj < pval_adj_thresh) %>%
+  arrange(desc(avg_log2FC)) # 按 logFC 降序排列
+
+
+# --- 比较 2: BB vs CC ---
+message(paste("正在计算:", target_group, "vs", control_group_2))
+deg_2 <- FindMarkers(
+  sub_seurat,
+  ident.1 = target_group,
+  ident.2 = control_group_2,
+  logfc.threshold = 0,
+  min.pct = 0.1,
+  only.pos = TRUE
+)
+
+# 筛选 2: 满足 logFC > 设定阈值 且 padj < 0.05
+res_2 <- deg_2 %>%
+  filter(avg_log2FC > logfc_thresh_BB_vs_CC & p_val_adj < pval_adj_thresh) %>%
+  arrange(desc(avg_log2FC))
+
+# ===================== 4. 取交集与输出 =====================
+
+# 找出两个列表中都存在的基因名
+common_genes <- intersect(rownames(res_1), rownames(res_2))
+
+# 提取交集基因的详细信息
+# 这里我们可以创建一个包含两组 logFC 的合并表，方便查看
+res_common <- data.frame(
+  Gene = common_genes,
+  LogFC_vs_AA = res_1[common_genes, "avg_log2FC"],
+  LogFC_vs_CC = res_2[common_genes, "avg_log2FC"],
+  Pval_adj_vs_AA = res_1[common_genes, "p_val_adj"],
+  Pval_adj_vs_CC = res_2[common_genes, "p_val_adj"]
+)
+
+message(paste("筛选完成。"))
+message(paste("BB vs AA 基因数:", nrow(res_1)))
+message(paste("BB vs CC 基因数:", nrow(res_2)))
+message(paste("同时满足条件的基因数:", nrow(res_common)))
+
+# ===================== 5. 保存 CSV 文件 =====================
+
+# 文件名构建
+file_1 <- paste0(out_prefix, target_celltype, "_", target_group, "_vs_", control_group_1, ".csv")
+file_2 <- paste0(out_prefix, target_celltype, "_", target_group, "_vs_", control_group_2, ".csv")
+file_3 <- paste0(out_prefix, target_celltype, "_", target_group, "_Specific_Intersection.csv")
+
+# 写入
+write.csv(res_1, file = file_1, quote = FALSE)
+write.csv(res_2, file = file_2, quote = FALSE)
+write.csv(res_common, file = file_3, row.names = FALSE, quote = FALSE)
+
+message("文件已保存。")
