@@ -83,7 +83,7 @@ infercnv_obj_run <- infercnv::run(
   out_dir = output_dir,     # ！！！关键修改：这里直接用相对路径
   cluster_by_groups = TRUE, 
   denoise = TRUE,           
-  HMM = TRUE,               
+  HMM = F,               
   num_threads = parallel::detectCores() - 2, 
   write_expr_matrix = TRUE,
   output_format = "pdf"
@@ -96,9 +96,13 @@ qsave(infercnv_obj_run, file.path(output_dir, "infercnv_obj_run.qs"))
 # ==============================================================================
 
 # 4.1 读取矩阵
-obs_data <- read.table(file.path(output_dir, "infercnv.observations.txt"), header = TRUE, check.names = FALSE)
-ref_data <- read.table(file.path(output_dir, "infercnv.references.txt"), header = TRUE, check.names = FALSE)
-all_cnv_data <- cbind(obs_data, ref_data)
+#obs_data <- read.table(file.path(output_dir, "infercnv.observations.txt"), header = TRUE, check.names = FALSE)
+#ref_data <- read.table(file.path(output_dir, "infercnv.references.txt"), header = TRUE, check.names = FALSE)
+#all_cnv_data <- cbind(obs_data, ref_data)
+
+# 4.1 直接从对象提取矩阵，避免读取文件的各种符号错误
+all_data_matrix <- infercnv_obj_run@expr.data
+obs_cells <- colnames(raw_counts_matrix)[!(colnames(raw_counts_matrix) %in% infercnv_obj_run@reference_grouped_cell_indices)]
 
 # 4.2 计算分数 (RSS方法)
 # 计算每个细胞所有基因CNV值的平方误差均值
@@ -152,5 +156,6 @@ malignant_obj <- subset(sc.obj, subset = Malignant_Status == "Malignant")
 qsave(malignant_obj, file.path(output_dir, "malignant_obj.qs"))
 
 print("分析全部结束。所有文件已保存至 inferCNV_output 文件夹。")
+
 
 
