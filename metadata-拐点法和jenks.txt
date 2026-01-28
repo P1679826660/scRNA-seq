@@ -1,86 +1,101 @@
-# 如果没有安装，请取消注释并运行
-# install.packages("BAMMtools")  # 用于 Jenks 断点
-# install.packages("factoextra") # 用于肘部法则可视化
-# install.packages("ggplot2")
-
+library(ggplot2)
+library(patchwork) # 用于拼图，如果没有安装请运行 install.packages("patchwork")
 
 # ==============================================================================
-# 步骤 1: 准备工作与计算
+# 1. 准备数据与计算
 # ==============================================================================
-library(BAMMtools) # 用于 Jenks 自然断点
-library(ggplot2)   # 用于绘图
 
-# 提取评分数据 (确保是数值型)
+# 提取评分
 scores <- as.numeric(sc.obj$aucell)
 
-# --- 方法 A: Jenks 自然断点法 (k=2) ---
-# getJenksBreaks 返回 [最小值, 断点, 最大值]
-jenks_breaks <- getJenksBreaks(scores, k = 2)
-t_jenks <- jenks_breaks[2]
-
-# --- 方法 B: K-means 聚类法 (k=2) ---
-set.seed(123) # 设置随机种子，保证结果稳定
+# --- 方法 A: K-means 聚类 (k=2) ---
+set.seed(123)
 km_res <- kmeans(scores, centers = 2)
-# 取两个聚类中心的中间值作为断点
-t_kmeans <- mean(km_res$centers)
+# 计算两个中心的中间值作为阈值
+cutoff_kmeans <- mean(km_res$centers)
+
+# --- 方法 B: 拐点法 (Knee/Inflection Point) ---
+# 1. 从大到小排序
+sorted_scores <- sort(scores, decreasing = TRUE)
+n_points <- length(sorted_scores)
+x_rank <- 1:n_points
+
+# 2. 几何法寻找拐点 (距离对角线最远的点)
+# 这是一个经典的寻找“肘/膝”点的算法 (Kneedle 算法简化版)
+find_knee_point <- function(x, y) {
+  # 归一化到 0-1
+  x_norm <- (x - min(x)) / (max(x) - min(x))
+  y_norm <- (y - min(y)) / (max(y) - min(y))
+  # 计算每个点到连接首尾直线的距离
+  # 在归一化坐标系中，直线方程 x - y = 0 (或 x + y = c)
+  # 实际上就是找 (y_norm - x_norm) 差值最大处（或者根据曲线凹凸性找反方向）
+  # 对于从大到小下降的曲线，通常是找离(0,0)到(1,1)连线最远的点
+  # 这里使用简单的向量投影逻辑：
+  start_point <- c(x_norm[1], y_norm[1])
+  end_point <- c(x_norm[length(x)], y_norm[length(y)])
+  
+  # 直线向量
+  line_vec <- end_point - start_point
+  
+  # 计算距离
+  dists <- sapply(1:length(x), function(i) {
+    point <- c(x_norm[i], y_norm[i])
+    vec_point <- point - start_point
+    # 叉乘求面积/距离
+    abs(line_vec[1] * vec_point[2] - line_vec[2] * vec_point[1])
+  })
+  
+  return(which.max(dists))
+}
+
+knee_index <- find_knee_point(x_rank, sorted_scores)
+cutoff_knee <- sorted_scores[knee_index]
 
 # ==============================================================================
-# 步骤 2: 输出数值对比与可视化
+# 2. 输出结果与可视化对比
 # ==============================================================================
 
-# 1. 在控制台打印数值
-cat("\n================ 阈值计算结果 ================\n")
-cat(sprintf("1. Jenks 建议阈值 (红色虚线): %.4f\n", t_jenks))
-cat(sprintf("2. K-means 建议阈值 (蓝色实线): %.4f\n", t_kmeans))
-cat("==============================================\n\n")
+cat("\n=== 阈值计算结果 ===\n")
+cat(sprintf("1. K-means 建议阈值 (分布法): %.4f\n", cutoff_kmeans))
+cat(sprintf("2. 拐点法 建议阈值 (排序法):   %.4f\n", cutoff_knee))
+cat("====================\n")
 
-# 2. 绘制对比图
-plot_data <- data.frame(Score = scores)
-
-p <- ggplot(plot_data, aes(x = Score)) +
-  # 绘制直方图
-  geom_histogram(bins = 60, fill = "lightgrey", color = "white") +
-  
-  # 绘制 Jenks 线 (红色虚线)
-  geom_vline(aes(xintercept = t_jenks, color = "Jenks"), 
-             linetype = "dashed", size = 1) +
-  
-  # 绘制 K-means 线 (蓝色实线)
-  geom_vline(aes(xintercept = t_kmeans, color = "K-means"), 
-             linetype = "solid", size = 1, alpha = 0.7) +
-  
-  # 标注具体数值
-  annotate("text", x = t_jenks, y = Inf, label = round(t_jenks, 3), 
-           vjust = 2, color = "red", fontface = "bold") +
-  annotate("text", x = t_kmeans, y = Inf, label = round(t_kmeans, 3), 
-           vjust = 4, color = "blue", fontface = "bold") +
-  
-  # 设置图例和标题
-  scale_color_manual(name = "算法方法", 
-                     values = c("Jenks" = "red", "K-means" = "blue")) +
-  labs(title = "二分类阈值对比: Jenks vs K-means",
-       subtitle = "请观察哪条线更好地将双峰分开 (落在波谷)",
-       x = "AUCell Score", y = "细胞数量") +
+# --- 图 1: 直方图 (展示 K-means 切割位置) ---
+p1 <- ggplot(data.frame(s=scores), aes(x=s)) +
+  geom_histogram(bins=60, fill="lightgrey", color="white") +
+  geom_vline(xintercept = cutoff_kmeans, color="blue", size=1, linetype="dashed") +
+  annotate("text", x=cutoff_kmeans, y=Inf, label=paste0("K-means\n", round(cutoff_kmeans,3)), 
+           vjust=1.5, color="blue", fontface="bold") +
+  labs(title="方法一: K-means (分布)", x="AUCell Score", y="Count") +
   theme_minimal()
 
-# 显示图片
-print(p)
+# --- 图 2: 排序图 (展示 拐点位置) ---
+plot_data_rank <- data.frame(Rank = x_rank, Score = sorted_scores)
+
+p2 <- ggplot(plot_data_rank, aes(x=Rank, y=Score)) +
+  geom_line(color="darkgreen", size=1) +
+  geom_point(x=knee_index, y=cutoff_knee, color="red", size=3) + # 标出拐点
+  geom_hline(yintercept = cutoff_knee, color="red", linetype="dashed") +
+  annotate("text", x=n_points*0.7, y=cutoff_knee, label=paste0("Knee Point\n", round(cutoff_knee,3)), 
+           vjust=-0.5, color="red", fontface="bold") +
+  labs(title="方法二: 拐点法 (排序)", x="Cell Rank", y="AUCell Score") +
+  theme_minimal()
+
+# 拼图显示
+p1 + p2
 
 # ==============================================================================
-# 步骤 3: 决策与写入 (请根据上图结果，修改下方代码)
+# 3. 决策并写入 (手动修改下方变量)
 # ==============================================================================
 
-# 【请选择】：查看图片后，决定使用哪个变量。
-# 如果觉得 Jenks (红线) 准，就用 t_jenks
-# 如果觉得 K-means (蓝线) 准，就用 t_kmeans
-# 或者你自己手动指定一个数字，例如: final_cutoff <- 0.15
+# 【请在这里二选一】
+# final_cutoff <- cutoff_kmeans  # 如果你喜欢左图的蓝线 (通常更保守)
+# final_cutoff <- cutoff_knee    # 如果你喜欢右图的红线 (通常只取表达量最高的Top细胞)
 
-final_cutoff <- t_jenks  # <--- 默认设为 Jenks，你可以修改为 t_kmeans
+final_cutoff <- cutoff_kmeans    # <--- 这里我默认设为 K-means，你可以改成 cutoff_knee
 
-# 执行写入 Seurat
-# 大于阈值为 High (阳性)，小于等于为 Low (阴性)
+# 写入 Seurat
 sc.obj$aucell_group <- ifelse(sc.obj$aucell > final_cutoff, "High", "Low")
 
-# 打印最终分类统计
-cat("\n最终分类结果统计 (基于阈值", round(final_cutoff, 4), "):\n")
+cat("\n最终分类统计 (阈值:", round(final_cutoff, 4), "):\n")
 print(table(sc.obj$aucell_group))
