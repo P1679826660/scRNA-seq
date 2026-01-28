@@ -218,3 +218,14 @@ vvv@meta.data[common_spots, "Malignant_Score"] <- malignant_frac[common_spots]
 # 这样你就能用大家熟悉的 Seurat 语法画图了
 SpatialFeaturePlot(vvv, features = "Malignant_Score") + 
   ggtitle("Liver Cancer Malignant Cells Distribution")
+
+
+
+
+
+#################
+#################
+#################
+#Cottrazm包，自动识别肿瘤边界、自动识别肿瘤，空间组学分析
+#精准地画出“肿瘤边界”
+
