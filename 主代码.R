@@ -401,12 +401,13 @@ print("全部分析流程结束！")
 
 ##########################
 #pbmc是大的图谱   pbmc$celltype.1
-              #TA是pbmc的亚群pbmc$celltype
+              #TA是pbmc的亚群TA$celltype
 
-library(dplyr)
+library(tidyverse)
 pbmc@meta.data <- pbmc@meta.data %>%
   mutate(celltype.2 = coalesce(TA@meta.data$celltype[match(rownames(pbmc@meta.data), rownames(TA@meta.data))], 
                                                              celltype.1))
+
 
 
 
