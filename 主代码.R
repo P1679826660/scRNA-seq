@@ -338,9 +338,18 @@ genes_to_check <- c("PTPRC", "IGKC",                      # 免疫细胞
                     "PECAM1", "PLVAP", "VWF",             # 内皮细胞
                     "COL1A1", "DCN")                      # 成纤维细胞
 
-DotPlot(sc.obj, features = genes_to_check, cols = c("RdYlBu")) + 
+
+DotPlot(TCS, features = genes_to_check,cols = c("RdYlBu")) + 
+  geom_point(aes(size=pct.exp), shape = 21, colour="black", stroke=0.5) +
+  guides(size=guide_legend(override.aes=list(shape=21, colour="black", fill="white"))) + 
   RotatedAxis() +
-  theme(axis.title = element_blank())
+  theme(
+    panel.background = element_blank(),
+    panel.border = element_rect(fill = NA),
+    panel.grid.major.x = element_line(color = "grey80"),
+    panel.grid.major.y = element_line(color = "grey80"),
+    axis.title = element_blank())
+
 
 # 7.2 手动注释 (根据上面的DotPlot结果)
 # 注意：这里的 new.cluster.ids 必须严格对应 cluster 0, 1, 2... 的顺序
@@ -407,6 +416,7 @@ library(tidyverse)
 pbmc@meta.data <- pbmc@meta.data %>%
   mutate(celltype.2 = coalesce(TA@meta.data$celltype[match(rownames(pbmc@meta.data), rownames(TA@meta.data))], 
                                                              celltype.1))
+
 
 
 
