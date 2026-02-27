@@ -1,0 +1,153 @@
+##################################################
+##################################################
+##################################################
+#TCGA-LIHC
+#TCGA数据库下载count数据或者TPM数据
+##################################################
+##################################################
+##################################################
+
+# === 0. 安装与加载包 (解决你的报错) ===
+# 如果没有安装过，请先取消下面两行的注释(#)运行安装：
+# if (!require("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+# BiocManager::install(c("DESeq2", "SummarizedExperiment"))
+# 第一步：先从 GitHub 强行安装这个缺失的 "TCGAbiolinksGUI.data"
+# 这是造成你报错的元凶
+#remotes::install_github("BioinformaticsFMRP/TCGAbiolinksGUI.data")
+
+# 第二步：依赖包有了之后，再重新安装主程序 TCGAbiolinks
+#remotes::install_github("BioinformaticsFMRP/TCGAbiolinks")
+
+# ========================================================
+# 1. 配置环境与参数
+# ========================================================
+library(TCGAbiolinks)
+library(dplyr)
+library(SummarizedExperiment)
+library(data.table)
+library(DESeq2)
+
+# 设置项目：想跑 LIHC 就填 "TCGA-LIHC"，胰腺癌填 "TCGA-PAAD"
+project_name <- "TCGA-LIHC" 
+dir.create(project_name, showWarnings = FALSE)
+
+# ========================================================
+# 2. 稳健下载 (防断连策略)
+# ========================================================
+# 设置超长超时时间，防止大文件中断
+options(timeout = 100000)
+
+query <- GDCquery(
+  project = project_name,
+  data.category = "Transcriptome Profiling",
+  data.type = "Gene Expression Quantification",
+  workflow.type = "STAR - Counts"
+)
+
+# 使用分块下载，每次下载20个文件，防止API超时
+GDCdownload(query, method = "api", files.per.chunk = 20)
+
+# 读取数据
+data_se <- GDCprepare(query)
+
+# ========================================================
+# 3. 提取数据并处理基因注释
+# ========================================================
+# 提取行注释 (基因信息)
+row_ranges <- rowRanges(data_se)
+gene_info <- data.frame(
+  ensembl_id = row_ranges$gene_id,
+  symbol = row_ranges$gene_name,
+  type = row_ranges$gene_type
+)
+
+# 提取 Raw Counts (用于 DESeq2)
+# 注意：先用 Ensembl ID 做行名，防止 Symbol 重复报错
+counts_mat <- assay(data_se, "unstranded")
+rownames(counts_mat) <- gene_info$ensembl_id
+
+# 提取 TPM (用于其他分析，保存备用)
+tpm_mat <- assay(data_se, "tpm_unstrand")
+rownames(tpm_mat) <- gene_info$ensembl_id
+
+# 保存 TPM 矩阵到本地 (加上基因名)
+tpm_output <- cbind(gene_info[, c("ensembl_id", "symbol")], as.data.frame(tpm_mat))
+fwrite(tpm_output, file.path(project_name, "TPM_Matrix_Annotated.csv"))
+
+# 将 Counts 矩阵和基因信息合并 (方便查看)
+counts_output <- cbind(gene_info[, c("ensembl_id", "symbol")], as.data.frame(counts_mat))
+
+# 保存 Raw Counts 为 CSV (重要备份)
+fwrite(counts_output, file.path(project_name, "Counts_Matrix_Raw.csv"))
+
+
+##################################################
+##################################################
+##################################################
+# ggpubr 包，显著性相关
+# install.packages("ggpubr")
+
+挑选特定的基因表达量，并可视化
+##################################################
+##################################################
+##################################################
+
+library(ggplot2)
+library(tidyr)
+library(ggpubr) # 用于计算和添加显著性标记
+
+# 1. 读取数据并保留短横线
+counts_data <- read.csv("Counts_Matrix_Raw.csv", stringsAsFactors = FALSE, check.names = FALSE)
+gene_list <- readLines("氯离子通道基因名.txt")
+
+# 提取目标基因
+filtered_data <- counts_data[counts_data$symbol %in% gene_list, ]
+
+write.csv(filtered_data, file = "Selected_Chloride_Channel_Genes.csv", row.names = FALSE)
+# 2. 数据格式转换：宽表变长表
+long_data <- pivot_longer(filtered_data, 
+                          cols = -c(ensembl_id, symbol),
+                          names_to = "Sample", 
+                          values_to = "Count")
+
+# 3. 区分肿瘤和正常样本
+long_data$Sample_Type_Code <- substr(long_data$Sample, 14, 15)
+long_data$Group <- ifelse(as.numeric(long_data$Sample_Type_Code) < 10, "Tumor", "Normal")
+
+# 将Group转换为因子变量，并设定顺序，让Normal排在左边，Tumor排在右边
+long_data$Group <- factor(long_data$Group, levels = c("Normal", "Tumor"))
+
+# 4. 数据标准化：计算Log2(Count + 1)
+long_data$Log_Count <- log2(long_data$Count + 1)
+
+# 5. 绘制带有显著性的全英文箱线图
+p_box_diff <- ggplot(long_data, aes(x = symbol, y = Log_Count, fill = Group)) +
+  # outlier.shape = NA 用于隐藏箱线图外的异常值点
+  geom_boxplot(outlier.shape = NA, position = position_dodge(0.8)) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, color = "black"),
+    axis.text.y = element_text(color = "black"),
+    plot.title = element_text(hjust = 0.5) # 标题居中
+  ) +
+  # 将所有文本替换为英文
+  labs(
+    title = "Expression of Chloride Channel Genes in HCC (Tumor vs Normal)",
+    x = "Gene Symbol",
+    y = "Expression Level (log2(Count + 1))",
+    fill = "Tissue Type"
+  ) +
+  scale_fill_manual(values = c("Normal" = "#66C2A5", "Tumor" = "#FC8D62")) +
+  # 添加组间统计学显著性检验
+  stat_compare_means(
+    aes(group = Group), 
+    method = "wilcox.test", 
+    label = "p.signif", # 用星号表示显著性级别 (*, **, ***, ns)
+    label.y.npc = "top" # 将星号标记放在图形顶部
+  )
+
+# 在RStudio中显示图形
+print(p_box_diff)
+
+# 保存为高质量PDF，供汇报使用
+ggsave("Boxplot_Tumor_vs_Normal_English.pdf", plot = p_box_diff, width = 20, height = 6)
