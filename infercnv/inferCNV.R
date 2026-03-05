@@ -91,6 +91,29 @@ infercnv_obj_run <- infercnv::run(
 
 qsave(infercnv_obj_run, file.path(output_dir, "infercnv_obj_run.qs"))
 
+
+
+
+
+# 计算每个细胞的CNV总分 (简单逻辑：偏离1的绝对值之和)
+cnv_matrix <- infercnv_obj_run@expr.data
+cnv_score <- colSums((cnv_matrix - 1)^2)
+
+# 将分值加回到你的Seurat对象中查看分布
+sc.obj$cnv_score <- cnv_score[colnames(sc.obj)]
+
+# 按照你的 'infer' 分组查看 CNV 指数分布
+VlnPlot(sc.obj, features = "cnv_score", group.by = "infer", pt.size = 0) +
+  geom_hline(yintercept = mean(sc.obj$cnv_score[sc.obj$infer == "Endo"]), 
+             linetype = "dashed", color = "red") +
+  ggtitle("CNV Score by Cluster")
+
+
+
+
+
+
+下面为旧代码
 # ==============================================================================
 # 步骤 4: CNV 评分计算与性质定义
 # ==============================================================================
@@ -228,4 +251,5 @@ SpatialFeaturePlot(vvv, features = "Malignant_Score") +
 #################
 #Cottrazm包，自动识别肿瘤边界、自动识别肿瘤，空间组学分析
 #精准地画出“肿瘤边界”
+
 
