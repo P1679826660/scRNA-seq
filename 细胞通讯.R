@@ -23,7 +23,15 @@ options(stringsAsFactors = FALSE)
 
 # [用户需修改]: 确认你的 Seurat 对象名，以及细胞类型所在的列名 (group.by)
 # 假设你的 Seurat 对象叫 seurat_obj，细胞类型列叫 "cell_type"
-cellchat <- createCellChat(object = seurat_obj, group.by = "cell_type")
+#cellchat <- createCellChat(object = seurat_obj, group.by = "cell_type")
+
+# 1. 提取数据矩阵（Seurat 5 用 layer）
+data.input <- GetAssayData(sc.obj, assay = "RNA", layer = "data") 
+# 2. 提取元数据
+meta <- sc.obj@meta.data 
+# 3. 通过矩阵创建 CellChat
+cellchat <- createCellChat(object = data.input, meta = meta, group.by = "celltype")
+
 
 # 检查细胞类型对应的细胞数量 (如果不平衡，太少的细胞群可能会报错)
 groupSize <- as.numeric(table(cellchat@idents))
