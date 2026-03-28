@@ -416,6 +416,8 @@ library(tidyverse)
 pbmc@meta.data <- pbmc@meta.data %>%
   mutate(celltype.2 = coalesce(TA@meta.data$celltype[match(rownames(pbmc@meta.data), rownames(TA@meta.data))], 
                                                              celltype.1))
+######################################################################################################################
+
 
 
 
@@ -423,5 +425,92 @@ pbmc@meta.data <- pbmc@meta.data %>%
 
 Nebulosa::plot_density(sc.obj, "tdTomato")
 
+library(Seurat)
+library(harmony)
+library(ggplot2)
+library(RColorBrewer)
 
+####################################################################################
+# 第一步：提取目标细胞并进行重新降维聚类
+####################################################################################
+
+# 设定你要提取的细胞类型（分析其他细胞时，只需修改这里的字符串）
+target_celltype <- "T"
+
+# 1. 提取目标细胞群
+sub_obj <- subset(pbmc, subset = celltype.1 == target_celltype)
+
+# 2. 标准化、寻找高变基因、缩放与 PCA
+sub_obj <- NormalizeData(sub_obj, normalization.method = "LogNormalize", scale.factor = 10000)
+sub_obj <- FindVariableFeatures(sub_obj, selection.method = "vst", nfeatures = 1500)
+sub_obj <- ScaleData(sub_obj)
+sub_obj <- RunPCA(sub_obj, features = VariableFeatures(object = sub_obj))
+
+# 3. 使用 Harmony 进行批次效应校正
+sub_obj <- RunHarmony(sub_obj, group.by.vars = "sample")
+
+# 4. 构建邻接图与聚类
+pcSelect <- 20 
+sub_obj <- FindNeighbors(sub_obj, reduction = "harmony", dims = 1:pcSelect)
+sub_obj <- FindClusters(sub_obj, resolution = 1.0)
+sub_obj <- RunUMAP(sub_obj, reduction = "harmony", dims = 1:pcSelect)
+
+# 可视化初步聚类结果
+pdf(file="1_子集重新聚类.pdf", width=7, height=6)
+DimPlot(sub_obj, reduction = "umap", label = TRUE, label.size = 4)
+dev.off()
+
+gc()
+
+
+####################################################################################
+# 第二步：亚群手动注释
+####################################################################################
+
+# 确保当前的默认标识（Idents）是刚刚聚类生成的 seurat_clusters
+Idents(sub_obj) <- "seurat_clusters"
+
+# 直接按 0, 1, 2... 的顺序提供亚群名称
+# 注意：提供的名称数量必须与实际生成的聚类数量严格一致
+new.cluster.ids <- c(
+  "CD8-TRGC1", "CD4-AIM1", "CD4-CCL20", "CD4-HSPA1B", "NK-B3GNT7", 
+  "CD4-Treg-FOXP3", "CD4-MYBL2", "CD4-TTR", "CD4-CD40LG", "CD8-ASPM", 
+  "Macro-FCGR2A", "CD8-CXCL13", "NK-CCL3", "Plasma-IGHG1", "B-BANK1"
+)
+
+# 自动将上述名称映射到当前的聚类编号上，替换原有的 0, 1, 2...
+names(new.cluster.ids) <- levels(sub_obj)
+sub_obj <- RenameIdents(sub_obj, new.cluster.ids)
+
+# 将映射好的正确名称保存到 metadata 的 celltype.2 列中
+sub_obj$celltype.2 <- Idents(sub_obj)
+
+pdf(file="2_小亚群注释结果.pdf", width=9, height=7)
+DimPlot(sub_obj, reduction = "umap", label = TRUE, repel = TRUE)
+dev.off()
+
+
+####################################################################################
+# 第三步：将细分注释投射回全体 pbmc 对象
+####################################################################################
+
+# 1. 在原 pbmc 对象中创建一个新列，复制原本的粗分注释
+pbmc$merged_celltype <- as.character(pbmc$celltype.1)
+
+# 2. 精准替换：通过 Cells() 锁定子集细胞，将它们的注释替换为细分后的名称
+pbmc$merged_celltype[Cells(sub_obj)] <- as.character(sub_obj$celltype.2)
+
+# 3. 转换为因子并设为默认分群标识
+pbmc$merged_celltype <- as.factor(pbmc$merged_celltype)
+Idents(pbmc) <- "merged_celltype"
+
+# 4. 可视化最终的全局对象
+# 动态计算所需的颜色数量，防止由于亚群太多导致默认调色板颜色不足而报错
+num_colors <- length(levels(pbmc$merged_celltype))
+custom_colors <- colorRampPalette(brewer.pal(12, "Set3"))(num_colors)
+
+pdf(file="3_全局对象-最终亚群注释.pdf", width=10, height=7)
+DimPlot(pbmc, reduction = "umap", group.by = "merged_celltype", label = FALSE) +
+  scale_color_manual(values = custom_colors)
+dev.off()
 
