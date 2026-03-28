@@ -421,6 +421,7 @@ pbmc@meta.data <- pbmc@meta.data %>%
 
 
 
+Nebulosa::plot_density(sc.obj, "tdTomato")
 
 
 
