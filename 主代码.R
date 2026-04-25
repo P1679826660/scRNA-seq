@@ -514,3 +514,66 @@ DimPlot(pbmc, reduction = "umap", group.by = "merged_celltype", label = FALSE) +
   scale_color_manual(values = custom_colors)
 dev.off()
 
+#########
+
+##########################
+# 1. 提取原始 count 矩阵 (decontX 必须使用未经过标准化的 raw counts)
+counts_matrix <- GetAssayData(sc.obj, assay = "RNA", layer = "count")
+
+# 2. 运行 decontX
+print("正在运行 decontX 校正环境RNA污染...")
+decontX_results <- decontX(counts_matrix)
+
+# ==============================================================================
+# 以下为核心修改部分
+# ==============================================================================
+
+# 3. 将 decontX 清洗后的干净矩阵 (decontXcounts)，作为一个全新的 Assay 存入对象中
+sc.obj[["decontX_RNA"]] <- CreateAssayObject(counts = decontX_results$decontXcounts)
+
+# 4. 强制将 Seurat 对象的默认分析通道切换为这个洗干净的新 Assay
+DefaultAssay(sc.obj) <- "decontX_RNA"
+
+# 5. 将污染分数记录在 metadata 中（仅用于可视化评估，不再用于严格的数值过滤）
+sc.obj$Contamination <- decontX_results$contamination
+
+# 可视化评估污染程度（可选）
+FeaturePlot(sc.obj, features = 'Contamination')
+
+
+print("环境RNA校正完成，当前 DefaultAssay 已切换为 decontX_RNA")
+
+
+
+
+
+###############
+# ==============================================================================
+# 5. 高级清洗：去除双细胞 (Doublets)
+# ==============================================================================
+# 原理：模拟双细胞的表达谱，看现有细胞是否与模拟数据高度相似
+
+print("正在运行 scDblFinder 去除双细胞...")
+# 提取样本信息，因为双细胞主要在同一样本内产生
+name <- sc.obj@meta.data$sample
+
+# 转换为 SingleCellExperiment 格式
+sce <- as.SingleCellExperiment(sc.obj)
+
+# 运行检测程序
+# dbr (Doublet Rate) 默认为自动估算，如果知道10x的上样量，可手动指定 (如 0.08)
+sce <- scDblFinder(sce, samples = name)
+
+# 将结果导回 Seurat 对象
+sc.obj$scDblFinder.score <- sce$scDblFinder.score # 双细胞得分
+sc.obj$scDblFinder.class <- sce$scDblFinder.class # 分类结果 (singlet/doublet)
+rm(sce); gc() # 清理内存
+
+# 查看双细胞比例
+print(table(sc.obj$scDblFinder.class))
+
+# 可视化
+DimPlot(sc.obj, group.by = "scDblFinder.class", cols = c("doublet" = "red", "singlet" = "grey"))
+
+# 执行过滤：只保留单细胞 (singlet)
+sc.obj <- subset(sc.obj, subset = scDblFinder.class == "singlet")
