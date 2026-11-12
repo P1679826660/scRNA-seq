@@ -577,3 +577,320 @@ DimPlot(sc.obj, group.by = "scDblFinder.class", cols = c("doublet" = "red", "sin
 
 # 执行过滤：只保留单细胞 (singlet)
 sc.obj <- subset(sc.obj, subset = scDblFinder.class == "singlet")
+##################
+
+
+
+              library(Seurat)
+library(qs)            # 极速读写大数据
+library(harmony)       # 去除批次效应
+library(ggplot2)       # 绘图基础
+library(scDblFinder)   # 去除双细胞
+library(SingleCellExperiment) # scDblFinder需要的数据格式
+library(decontX)       # 去除游离RNA污染 (背景噪音)
+library(viridis)       # 美观的配色方案
+library(tidyverse)         # 数据处理神器 (mutate, filter等)
+library(data.table) # 用于 fread 快速读取大数据
+library(limma)      # 用于 avereps 处理重复基因
+library(Matrix)     # 用于处理矩阵
+
+
+sc.obj=qread("恶性细胞+微环境.qs")
+
+sc.obj <- NormalizeData(object = sc.obj, normalization.method = "LogNormalize", scale.factor = 10000)
+
+sc.obj <- FindVariableFeatures(object = sc.obj, selection.method = "vst", nfeatures = 2000) 
+
+sc.obj <- ScaleData(sc.obj)   
+gc() # 释放内存
+
+sc.obj <- RunPCA(sc.obj, features = VariableFeatures(object = sc.obj))
+
+sc.obj <- RunHarmony(sc.obj, group.by.vars = "sample")
+
+ElbowPlot(sc.obj)
+
+pcSelect <- 30  # 根据ElbowPlot选择，通常选20-30
+sc.obj <- FindNeighbors(sc.obj, reduction = "harmony", dims = 1:pcSelect)
+sc.obj <- FindClusters(object = sc.obj, resolution = 1) # 分辨率越高，亚群分得越细
+sc.obj <- RunUMAP(sc.obj, reduction = "harmony", dims = 1:pcSelect)
+DimPlot(sc.obj, reduction = "umap", label = TRUE) 
+##############
+name <- sc.obj@meta.data$sample
+
+# 转换为 SingleCellExperiment 格式
+sce <- as.SingleCellExperiment(sc.obj)
+
+# 运行检测程序
+# dbr (Doublet Rate) 默认为自动估算，如果知道10x的上样量，可手动指定 (如 0.08)
+sce <- scDblFinder(sce, samples = name)
+
+# 将结果导回 Seurat 对象
+sc.obj$scDblFinder.score <- sce$scDblFinder.score # 双细胞得分
+sc.obj$scDblFinder.class <- sce$scDblFinder.class # 分类结果 (singlet/doublet)
+rm(sce); gc() # 清理内存
+
+# 查看双细胞比例
+print(table(sc.obj$scDblFinder.class))
+
+# 可视化
+DimPlot(sc.obj, group.by = "scDblFinder.class", cols = c("doublet" = "red", "singlet" = "grey"))
+
+# 执行过滤：只保留单细胞 (singlet)
+sc.obj <- subset(sc.obj, subset = scDblFinder.class == "singlet")
+
+
+
+########################
+library(Seurat)
+library(decontX)
+library(harmony)
+library(ggplot2)
+library(patchwork)
+
+set.seed(123)
+
+# =====================================================
+# 1. 提取原始 counts，运行 decontX
+# =====================================================
+
+counts <- LayerData(sc.obj, assay = "RNA", layer = "counts")
+counts <- counts[, colnames(sc.obj), drop = FALSE]
+
+
+res <- decontX(
+  x = counts,
+  batch = sc.obj$sample
+)
+
+# =====================================================
+# 2. 添加污染评分和去污染矩阵
+# =====================================================
+
+sc.obj$Contamination <- res$contamination
+
+sc.obj[["decontX"]] <- CreateAssayObject(
+  counts = round(res$decontXcounts)
+)
+
+# 查看污染评分
+summary(sc.obj$Contamination)
+
+FeaturePlot(
+  sc.obj,
+  features = "Contamination",
+  reduction = "umap"
+) +
+  scale_color_viridis_c()
+
+VlnPlot(
+  sc.obj,
+  features = "Contamination",
+  group.by = "sample",
+  pt.size = 0
+) + NoLegend()
+
+# =====================================================
+# 3. 基于去污染矩阵重新标准化与 PCA
+# =====================================================
+
+DefaultAssay(sc.obj) <- "decontX"
+
+sc.obj <- NormalizeData(object = sc.obj, normalization.method = "LogNormalize", scale.factor = 10000)
+
+sc.obj <- FindVariableFeatures(object = sc.obj, selection.method = "vst", nfeatures = 2000) 
+
+sc.obj <- ScaleData(sc.obj)   
+gc() 
+
+sc.obj <- RunPCA(sc.obj, features = VariableFeatures(object = sc.obj))
+
+sc.obj <- RunHarmony(sc.obj, group.by.vars = "sample")
+
+ElbowPlot(sc.obj)
+
+pcSelect <- 30  
+sc.obj <- FindNeighbors(sc.obj, reduction = "harmony", dims = 1:pcSelect)
+sc.obj <- FindClusters(object = sc.obj, resolution = 1) 
+sc.obj <- RunUMAP(sc.obj, reduction = "harmony", dims = 1:pcSelect)
+DimPlot(sc.obj, reduction = "umap", label = TRUE) 
+rm(counts)
+rm(res)
+
+#######################
+genes_to_check <- c("PTPRC", "IGKC",                      
+                    "EPCAM", "KRT8", "KRT18",
+                    "PECAM1", "PLVAP", "VWF",             
+                    "COL1A1", "DCN")                      
+
+
+DotPlot(sc.obj, features = genes_to_check,cols = c("RdYlBu")) + 
+  geom_point(aes(size=pct.exp), shape = 21, colour="black", stroke=0.5) +
+  guides(size=guide_legend(override.aes=list(shape=21, colour="black", fill="white"))) + 
+  RotatedAxis() +
+  theme(
+    panel.background = element_blank(),
+    panel.border = element_rect(fill = NA),
+    panel.grid.major.x = element_line(color = "grey80"),
+    panel.grid.major.y = element_line(color = "grey80"),
+    axis.title = element_blank())
+
+
+
+
+new.cluster.ids <- c(
+  "PTPRC","Tumor","PTPRC","Tumor","Tumor","Tumor","Tumor","Plasma","Endo","PTPRC","PTPRC","PTPRC","Fib","Tumor","Tumor","PTPRC","PTPRC","PTPRC","Tumor","Fib","PTPRC","Tumor","PTPRC","Endo","Endo","PTPRC"
+)
+
+# 获取当前 cluster ID
+clusters <- as.character(sc.obj$seurat_clusters)
+max_cluster_num <- max(as.numeric(clusters))
+
+# 安全检查：确保ID数量匹配
+if (length(new.cluster.ids) != (max_cluster_num + 1)) {
+  stop(paste0("错误：您提供了 ", length(new.cluster.ids), " 个名字，但数据中有 ", 
+              (max_cluster_num + 1), " 个 Cluster。请重新检查 new.cluster.ids"))
+}
+
+# 创建新的注释列 celltype.1
+# 使用 factor 并指定 levels，保证顺序不乱
+sc.obj$celltype.1 <- factor(x = clusters,
+                            levels = as.character(0:max_cluster_num),
+                            labels = new.cluster.ids)
+
+# 可视化最终注释结果
+DimPlot(sc.obj, reduction = "umap", label = TRUE, group.by = "celltype.1")
+
+####
+genes_to_check <- c("PTPRC", "IGKC",                      
+                    "KRT8", "KRT18",
+                    "PECAM1", "PLVAP", "VWF",             
+                    "COL1A1", "DCN",
+                    "CD79A","MS4A1",
+                    "CD3D","CD3E","FCGR3A",
+                    "CD68","CD163","KIT","LAMP3","LILRA4"
+                    )                      
+
+
+DotPlot(sc.obj, features = genes_to_check,cols = c("RdYlBu")) + 
+  geom_point(aes(size=pct.exp), shape = 21, colour="black", stroke=0.5) +
+  guides(size=guide_legend(override.aes=list(shape=21, colour="black", fill="white"))) + 
+  RotatedAxis() +
+  theme(
+    panel.background = element_blank(),
+    panel.border = element_rect(fill = NA),
+    panel.grid.major.x = element_line(color = "grey80"),
+    panel.grid.major.y = element_line(color = "grey80"),
+    axis.title = element_blank())
+
+
+
+
+new.cluster.ids <- c(
+  "Myeloid","Tumor","T Cell","Tumor","Tumor","Tumor","Tumor","Plasma","Endo","Myeloid","T Cell","T Cell","Fib","Tumor","Tumor","Myeloid","T Cell","B Cell","Tumor","Fib","Myeloid","Tumor","Myeloid","Endo","Endo","Mast"
+)
+
+# 获取当前 cluster ID
+clusters <- as.character(sc.obj$seurat_clusters)
+max_cluster_num <- max(as.numeric(clusters))
+
+# 安全检查：确保ID数量匹配
+if (length(new.cluster.ids) != (max_cluster_num + 1)) {
+  stop(paste0("错误：您提供了 ", length(new.cluster.ids), " 个名字，但数据中有 ", 
+              (max_cluster_num + 1), " 个 Cluster。请重新检查 new.cluster.ids"))
+}
+
+# 创建新的注释列 celltype.1
+# 使用 factor 并指定 levels，保证顺序不乱
+sc.obj$celltype.2 <- factor(x = clusters,
+                            levels = as.character(0:max_cluster_num),
+                            labels = new.cluster.ids)
+
+# 可视化最终注释结果
+DimPlot(sc.obj, reduction = "umap", label = TRUE, group.by = "celltype.2")
+
+
+
+
+
+
+
+#######################
+sub_obj <- subset(sc.obj, subset = celltype.2 == "T Cell")
+
+# 2. 标准化、寻找高变基因、缩放与 PCA
+sub_obj <- NormalizeData(sub_obj, normalization.method = "LogNormalize", scale.factor = 10000)
+sub_obj <- FindVariableFeatures(sub_obj, selection.method = "vst", nfeatures = 1500)
+sub_obj <- ScaleData(sub_obj)
+sub_obj <- RunPCA(sub_obj, features = VariableFeatures(object = sub_obj))
+
+# 3. 使用 Harmony 进行批次效应校正
+sub_obj <- RunHarmony(sub_obj, group.by.vars = "sample")
+
+# 4. 构建邻接图与聚类
+pcSelect <- 20 
+sub_obj <- FindNeighbors(sub_obj, reduction = "harmony", dims = 1:pcSelect)
+sub_obj <- FindClusters(sub_obj, resolution = 0.5)
+sub_obj <- RunUMAP(sub_obj, reduction = "harmony", dims = 1:pcSelect)
+
+DimPlot(sub_obj, reduction = "umap", label = TRUE) 
+
+genes_to_check <- c("FOXP3",
+  "CD3D", "CD3E", "TRAC",
+  "CD4", "CD40LG", "IL7R", "LTB", "CD28", "ICOS",
+  "CD8A", "CD8B",
+  "FCGR3A","NCAM1"
+)                    
+
+
+DotPlot(sub_obj, features = genes_to_check,cols = c("RdYlBu")) + 
+  geom_point(aes(size=pct.exp), shape = 21, colour="black", stroke=0.5) +
+  guides(size=guide_legend(override.aes=list(shape=21, colour="black", fill="white"))) + 
+  RotatedAxis() +
+  theme(
+    panel.background = element_blank(),
+    panel.border = element_rect(fill = NA),
+    panel.grid.major.x = element_line(color = "grey80"),
+    panel.grid.major.y = element_line(color = "grey80"),
+    axis.title = element_blank())
+
+
+
+
+new.cluster.ids <- c(
+  "T-CD4","Treg","T-CD8","T-CD8","NK","T-CD8","NK","T-CD8","B Cell"
+  
+)
+
+
+# 获取当前 cluster ID
+clusters <- as.character(sub_obj$seurat_clusters)
+max_cluster_num <- max(as.numeric(clusters))
+
+# 安全检查：确保ID数量匹配
+if (length(new.cluster.ids) != (max_cluster_num + 1)) {
+  stop(paste0("错误：您提供了 ", length(new.cluster.ids), " 个名字，但数据中有 ", 
+              (max_cluster_num + 1), " 个 Cluster。请重新检查 new.cluster.ids"))
+}
+
+# 创建新的注释列 celltype.1
+# 使用 factor 并指定 levels，保证顺序不乱
+sub_obj$celltype <- factor(x = clusters,
+                            levels = as.character(0:max_cluster_num),
+                            labels = new.cluster.ids)
+
+
+# 1. 在原 pbmc 对象中创建一个新列，复制原本的粗分注释
+sc.obj$celltype.3 <- as.character(sc.obj$celltype.2)
+
+# 2. 精准替换：通过 Cells() 锁定子集细胞，将它们的注释替换为细分后的名称
+sc.obj$celltype.3[Cells(sub_obj)] <- as.character(sub_obj$celltype)
+
+# 3. 转换为因子并设为默认分群标识
+sc.obj$celltype.3 <- as.factor(sc.obj$celltype.3)
+
+DimPlot(sc.obj, reduction = "umap", group.by = "celltype.3", label = T) 
+####################
+
+
+
